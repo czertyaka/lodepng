@@ -39,8 +39,19 @@ NOTE: it overwrites the output file without warning if it exists!
 //g++ lodepng.cpp example_bmp2png.cpp -ansi -pedantic -Wall -Wextra -O3
 
 #include "lodepng.h"
+#include <unistd.h>
 
 #include <iostream>
+
+#ifndef __AFL_FUZZ_TESTCASE_LEN
+    ssize_t fuzz_len;
+    #define __AFL_FUZZ_TESTCASE_LEN fuzz_len
+    unsigned char fuzz_buf[1024000];
+    #define __AFL_FUZZ_TESTCASE_BUF fuzz_buf
+    #define __AFL_FUZZ_INIT() void sync(void);
+    #define __AFL_LOOP(x) ((fuzz_len = read(0, fuzz_buf, sizeof(fuzz_buf))) > 0 ? 1 : 0)
+    #define __AFL_INIT() sync()
+#endif
 
 //returns 0 if all went ok, non-0 if error
 //output image is always given in RGBA (with alpha channel), even if it's a BMP without alpha channel
@@ -95,6 +106,8 @@ unsigned decodeBMP(std::vector<unsigned char>& image, unsigned& w, unsigned& h, 
   return 0;
 }
 
+__AFL_FUZZ_INIT()
+
 int main(int argc, char *argv[]) {
   if(argc < 3) {
     std::cout << "Please provide input BMP and output PNG file names" << std::endl;
@@ -112,14 +125,24 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
-  std::vector<unsigned char> png;
-  error = lodepng::encode(png, image, w, h);
+#ifdef __AFL_HAVE_MANUAL_CONTROL
+    __AFL_INIT();
+#endif
 
-  if(error) {
-    std::cout << "PNG encoding error " << error << ": " << lodepng_error_text(error) << std::endl;
-    return 0;
-  }
+    unsigned char *buf = __AFL_FUZZ_TESTCASE_BUF;
+    while (__AFL_LOOP(10000))
+    {
+        const int len = __AFL_FUZZ_TESTCASE_LEN;
+        if (len < 8)
+        {
+            continue;
+        }
 
-  lodepng::save_file(png, argv[2]);
-
+        std::vector<unsigned char> png(buf, buf + len);
+        error = lodepng::encode(png, image, w, h);
+        if(error) {
+            std::cout << "PNG encoding error " << error << ": " << lodepng_error_text(error) << std::endl;
+        }
+        lodepng::save_file(png, argv[2]);
+    }
 }
